@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "roleradar"
+version = "0.1.0"
+description = "Match a resume to live AI roles using only evidence in the job listing"
+requires-python = ">=3.10"
+dependencies = ["rich>=13.7", "pypdf>=5.0"]
+
+[project.scripts]
+roleradar = "roleradar.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+include = ["roleradar*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
