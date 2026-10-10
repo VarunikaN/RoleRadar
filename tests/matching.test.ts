@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { SKILLS, canonical, cleanSkillList, extractSkills, profileReport, rankJob, rankJobs, topSkills } from "../lib/matching";
+import { ALIASES, CATEGORIES, SKILLS, canonical, cleanSkillList, extractSkills, profileReport, rankJob, rankJobs, topSkills } from "../lib/matching";
 
 type Parity = {
   extract: { name: string; text: string; skills: string[] }[];
@@ -16,14 +16,14 @@ type Parity = {
   profile: { text: string; headline: string; pillars: string[]; proof_points: string[] }[];
 };
 
-const parity: Parity = JSON.parse(readFileSync(join(__dirname, "..", "..", "tests", "parity.json"), "utf-8"));
+const fixtures: Parity = JSON.parse(readFileSync(join(__dirname, "fixtures.json"), "utf-8"));
 
-describe("shared vectors (same file the Python tests read)", () => {
-  it.each(parity.extract)("extract: $name", ({ text, skills }) => {
+describe("extraction and matching fixtures", () => {
+  it.each(fixtures.extract)("extract: $name", ({ text, skills }) => {
     expect(extractSkills(text)).toEqual(skills);
   });
 
-  it.each(parity.match)("match: $name", ({ skills, job, matched, score, missing }) => {
+  it.each(fixtures.match)("match: $name", ({ skills, job, matched, score, missing }) => {
     const ranked = rankJob({ id: "1", ...job } as never, skills);
     if (matched.length === 0) {
       expect(ranked).toBeNull();
@@ -35,8 +35,8 @@ describe("shared vectors (same file the Python tests read)", () => {
   });
 });
 
-describe("profile vectors (same file the Python tests read)", () => {
-  it.each(parity.profile)("profile: $text", ({ text, headline, pillars, proof_points }) => {
+describe("profile fixtures", () => {
+  it.each(fixtures.profile)("profile: $text", ({ text, headline, pillars, proof_points }) => {
     const report = profileReport(text);
     expect(report.headline).toBe(headline);
     expect(report.pillars).toEqual(pillars);
@@ -51,11 +51,18 @@ describe("profile vectors (same file the Python tests read)", () => {
 });
 
 describe("vocabulary", () => {
-  it("is byte-identical to the Python vocabulary", () => {
-    const python = readFileSync(join(__dirname, "..", "..", "roleradar", "skills.json"), "utf-8");
-    const web = readFileSync(join(__dirname, "..", "lib", "skills.json"), "utf-8");
-    expect(JSON.parse(web)).toEqual(JSON.parse(python));
+  it("has the documented size and every skill in exactly one field", () => {
     expect(SKILLS).toHaveLength(398);
+    expect(new Set(SKILLS).size).toBe(SKILLS.length);
+    expect(Object.keys(ALIASES)).toHaveLength(84);
+    expect(CATEGORIES).toHaveLength(21);
+    const listed = CATEGORIES.flatMap((category) => category.skills);
+    expect([...listed].sort()).toEqual([...SKILLS].sort());
+    expect(CATEGORIES.every((category) => category.role.length > 0)).toBe(true);
+  });
+
+  it("points every alias at a real skill", () => {
+    expect(Object.values(ALIASES).every((target) => SKILLS.includes(target))).toBe(true);
   });
 });
 

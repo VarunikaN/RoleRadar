@@ -26,17 +26,21 @@ function upload(name: string, content: BlobPart, type = "") {
 }
 
 beforeEach(resetRateLimits);
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 
 type Handler = (url: string) => Response | Promise<Response>;
 
-function stubSources(handlers: { aidev?: Handler; arbeitnow?: Handler; muse?: Handler }) {
+function stubSources(handlers: { aidev?: Handler; arbeitnow?: Handler; muse?: Handler; adzuna?: Handler }) {
   const empty: Handler = () => Response.json({});
   const mock = vi.fn(async (input: unknown) => {
     const url = String(input);
     if (url.includes("aidevboard")) return (handlers.aidev ?? (() => Response.json({ jobs: [] })))(url);
     if (url.includes("arbeitnow")) return (handlers.arbeitnow ?? (() => Response.json({ data: [] })))(url);
     if (url.includes("themuse")) return (handlers.muse ?? (() => Response.json({ results: [] })))(url);
+    if (url.includes("adzuna")) return (handlers.adzuna ?? (() => Response.json({ results: [] })))(url);
     return empty(url);
   });
   vi.stubGlobal("fetch", mock);
@@ -152,6 +156,64 @@ describe("GET /api/jobs", () => {
     let last = 200;
     for (let index = 0; index < 31; index += 1) last = (await jobsGet("q=ml")).status;
     expect(last).toBe(429);
+  });
+});
+
+describe("GET /api/jobs with India listings", () => {
+  const ADZUNA = {
+    results: [
+      { id: 55, title: "Staff Accountant", company: { display_name: "Tata" }, location: { display_name: "Pune, Maharashtra" }, description: "<p>payroll</p>", redirect_url: "https://example.com/a", created: "2026-09-01T00:00:00Z" },
+      { title: "no id" },
+    ],
+  };
+
+  beforeEach(async () => {
+    (await import("../lib/sources")).clearSourceCache();
+    vi.stubEnv("ADZUNA_APP_ID", "");
+    vi.stubEnv("ADZUNA_APP_KEY", "");
+  });
+
+  it("does not call Adzuna unless India is requested", async () => {
+    vi.stubEnv("ADZUNA_APP_ID", "id-1");
+    vi.stubEnv("ADZUNA_APP_KEY", "key-1");
+    const fetchMock = stubSources({});
+    await jobsGet("q=accountant");
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("adzuna"))).toBe(false);
+  });
+
+  it("explains that India listings are skipped when no keys are set", async () => {
+    stubSources({ aidev: () => Response.json({ jobs: [{ id: "1", title: "Analyst" }] }) });
+    const body = await (await jobsGet("q=analyst&india=true")).json();
+    expect(body.jobs).toHaveLength(1);
+    expect(body.warnings).toEqual(["India listings skipped: set ADZUNA_APP_ID and ADZUNA_APP_KEY to enable them."]);
+  });
+
+  it("returns Adzuna listings when keys are set and sends the query", async () => {
+    vi.stubEnv("ADZUNA_APP_ID", "id-1");
+    vi.stubEnv("ADZUNA_APP_KEY", "key-1");
+    const fetchMock = stubSources({ adzuna: () => Response.json(ADZUNA) });
+    const body = await (await jobsGet("q=accountant&india=true")).json();
+    const job = body.jobs.find((item: { source: string }) => item.source === "Adzuna");
+    expect(job).toMatchObject({ id: "adzuna-55", title: "Staff Accountant", company_name: "Tata", apply_url: "https://example.com/a" });
+    expect(job.description).toBe("payroll");
+    const url = fetchMock.mock.calls.map((call) => String(call[0])).find((item) => item.includes("adzuna")) ?? "";
+    expect(url).toContain("what=accountant");
+    expect(JSON.stringify(body)).not.toContain("key-1");
+  });
+
+  it.each([
+    ["an HTTP error", () => new Response("x", { status: 401 })],
+    ["a network failure", () => { throw new Error("https://api.adzuna.com/?app_key=key-1 failed"); }],
+  ])("keeps the other sources and never leaks the key on %s", async (_name, adzuna) => {
+    vi.stubEnv("ADZUNA_APP_ID", "id-1");
+    vi.stubEnv("ADZUNA_APP_KEY", "key-1");
+    stubSources({ aidev: () => Response.json({ jobs: [{ id: "1", title: "Analyst" }] }), adzuna });
+    const response = await jobsGet("q=analyst&india=true");
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.jobs).toHaveLength(1);
+    expect(body.warnings).toHaveLength(1);
+    expect(JSON.stringify(body)).not.toContain("key-1");
   });
 });
 

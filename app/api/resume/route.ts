@@ -1,11 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PDFParse } from "pdf-parse";
-import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { access, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { promisify } from "node:util";
 import {
   MAX_FILE_BYTES,
   MAX_LINK_BYTES,
@@ -19,9 +13,9 @@ import {
   validateResumeUrl,
   ALLOWED_HOSTS,
 } from "../../../lib/guards";
+import { USER_AGENT } from "../../../lib/sources";
 
 const MAX_REDIRECTS = 3;
-const execFileAsync = promisify(execFile);
 
 PDFParse.setWorker("https://cdn.jsdelivr.net/npm/pdf-parse@2.4.5/dist/pdf-parse/web/pdf.worker.min.mjs");
 
@@ -29,43 +23,11 @@ const fail = (error: string, status: number) => NextResponse.json({ error }, { s
 const tooMany = () => fail("Too many requests. Wait a minute and try again.", 429);
 
 async function extractPdfText(buffer: ArrayBuffer): Promise<string> {
+  const parser = new PDFParse({ data: Buffer.from(buffer) });
   try {
-    const parser = new PDFParse({ data: Buffer.from(buffer) });
-    try {
-      return (await parser.getText()).text ?? "";
-    } finally {
-      await parser.destroy();
-    }
-  } catch {
-    return extractPdfTextWithPython(buffer);
-  }
-}
-
-async function extractPdfTextWithPython(buffer: ArrayBuffer): Promise<string> {
-  const pythonPath = resolve(process.cwd(), "..", ".venv", "bin", "python");
-  await access(pythonPath);
-  const tempPath = join(tmpdir(), `roleradar-${randomUUID()}.pdf`);
-  await writeFile(tempPath, Buffer.from(buffer));
-  try {
-    const { stdout } = await execFileAsync(
-      pythonPath,
-      [
-        "-c",
-        [
-          "from pathlib import Path",
-          "from pypdf import PdfReader",
-          "import sys",
-          "path = Path(sys.argv[1])",
-          "text = '\\n'.join(page.extract_text() or '' for page in PdfReader(path).pages)",
-          "print(text)",
-        ].join("; "),
-        tempPath,
-      ],
-      { maxBuffer: 10 * 1024 * 1024, timeout: 15_000 },
-    );
-    return stdout;
+    return (await parser.getText()).text ?? "";
   } finally {
-    await rm(tempPath, { force: true });
+    await parser.destroy();
   }
 }
 
@@ -111,7 +73,7 @@ export async function POST(request: NextRequest) {
 async function fetchAllowed(start: URL): Promise<Response> {
   let url = start;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
-    const response = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(10_000), headers: { "User-Agent": "RoleRadar/0.2" } });
+    const response = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(10_000), headers: { "User-Agent": USER_AGENT } });
     if (response.status < 300 || response.status >= 400) return response;
     const location = response.headers.get("location");
     if (!location) throw new Error("redirect without location");

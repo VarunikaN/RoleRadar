@@ -1,5 +1,5 @@
 {
-  "name": "roleradar-web",
+  "name": "roleradar",
   "private": true,
   "scripts": {
     "dev": "next dev",

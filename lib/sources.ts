@@ -223,10 +223,46 @@ export async function fetchMuse(query: string, remote: boolean, level: string | 
   return [...jobs.values()];
 }
 
+const ADZUNA_URL = "https://api.adzuna.com/v1/api/jobs/in/search/1";
+
+export function adzunaConfigured(env: Record<string, string | undefined> = process.env): boolean {
+  return Boolean(env.ADZUNA_APP_ID && env.ADZUNA_APP_KEY);
+}
+
+export async function fetchAdzuna(query: string, env: Record<string, string | undefined> = process.env): Promise<SourceJob[]> {
+  const params = new URLSearchParams({
+    app_id: env.ADZUNA_APP_ID ?? "",
+    app_key: env.ADZUNA_APP_KEY ?? "",
+    results_per_page: "30",
+  });
+  if (query) params.set("what", query);
+  const payload = await getJson(`${ADZUNA_URL}?${params}`, "Adzuna");
+  const results = isObject(payload) && Array.isArray(payload.results) ? payload.results : [];
+  return results.filter(isObject).filter((job) => job.id).map((job) => ({
+    id: `adzuna-${text(job.id)}`,
+    title: text(job.title) || "Untitled role",
+    company_name: (isObject(job.company) && text(job.company.display_name)) || "Unknown company",
+    description: stripHtml(job.description),
+    requirements: "",
+    location: (isObject(job.location) && text(job.location.display_name)) || "India",
+    workplace: "onsite or unspecified",
+    experience_level: "",
+    tags: [],
+    apply_url: safeHttpUrl(job.redirect_url),
+    created_at: text(job.created),
+    source: "Adzuna",
+  }));
+}
+
 export type Fetched = { jobs: SourceJob[]; warnings: string[] };
 
-export async function fetchAll(query: string, remote: boolean, level: string | null): Promise<Fetched> {
+export async function fetchAll(query: string, remote: boolean, level: string | null, india = false): Promise<Fetched> {
   const sources = [fetchAiDev(query, remote, level), fetchArbeitnow(query, remote), fetchMuse(query, remote, level)];
+  const skipped: string[] = [];
+  if (india) {
+    if (adzunaConfigured()) sources.push(fetchAdzuna(query));
+    else skipped.push("India listings skipped: set ADZUNA_APP_ID and ADZUNA_APP_KEY to enable them.");
+  }
   const results = await Promise.allSettled(sources);
   const jobs = new Map<string, SourceJob>();
   const warnings: string[] = [];
@@ -243,5 +279,5 @@ export async function fetchAll(query: string, remote: boolean, level: string | n
   if (warnings.length === results.length) {
     throw new SourceError(warnings.join(" "), rateLimited ? 429 : 503);
   }
-  return { jobs: [...jobs.values()], warnings };
+  return { jobs: [...jobs.values()], warnings: [...warnings, ...skipped] };
 }

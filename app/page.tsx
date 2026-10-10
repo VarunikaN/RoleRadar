@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Job, cleanSkillList, extractSkills, profileReport, proofPoints, rankJobs, suggestedRole, themesFor } from "../lib/matching";
+import { Job, cleanSkillList, extractSkills, profileReport, proofPoints, rankJobs, suggestedRole, themesFor, topSkills } from "../lib/matching";
 import { MAX_FILE_BYTES, safeHttpUrl } from "../lib/guards";
 
 const ROLE_PRESETS = [
@@ -52,6 +52,7 @@ export default function Home() {
     [resume, extracted],
   );
   const ranked = useMemo(() => rankJobs(jobs, extracted), [jobs, extracted]);
+  const demand = useMemo(() => topSkills(jobs, 8), [jobs]);
   const step = resume ? (jobs.length ? 3 : 2) : 1;
 
   useEffect(() => {
@@ -69,7 +70,7 @@ export default function Home() {
     setError("");
     setStatus(next?.statusPrefix ?? "Scanning current role listings and calculating skill alignment...");
     try {
-      const res = await fetch(`/api/jobs?q=${encodeURIComponent(role)}&remote=${remote}&level=${level}`);
+      const res = await fetch(`/api/jobs?q=${encodeURIComponent(role)}&remote=${remote}&level=${level}&india=${market === "India"}`);
       const body = await res.json();
       if (current !== requestId.current) return;
       const found: Job[] = Array.isArray(body.jobs) ? body.jobs : [];
@@ -82,9 +83,8 @@ export default function Home() {
         setError(`No roles found for '${role}'. That title may not exist in the job feeds. Try a broader title such as analyst, manager or engineer.`);
         setStatus("No roles retrieved.");
       } else {
-        const caveat = market === "India" ? " Note: the free sources skew to the US and Europe." : "";
         const warning = Array.isArray(body.warnings) && body.warnings.length ? ` ${body.warnings.join(" ")}` : "";
-        setStatus(`${found.length} roles retrieved for '${role}'.${caveat}${warning}`);
+        setStatus(`${found.length} roles retrieved for '${role}'.${warning}`);
       }
     } catch {
       if (current !== requestId.current) return;
@@ -363,6 +363,16 @@ export default function Home() {
                   </p>
                 </div>
               ) : (
+                <>
+                <article className="card">
+                  <div className="card-title">
+                    <h3>In demand across these listings</h3>
+                    <span>{jobs.length} retrieved</span>
+                  </div>
+                  <div className="chips">
+                    {demand.map(([skill, count]) => <span key={skill} className="chip">{skill} · {count}</span>)}
+                  </div>
+                </article>
                 <div className="jobs">
                   {ranked.map((job) => (
                     <article key={job.id} className={`job${expandedJob === job.id ? " expanded" : ""}`}>
@@ -402,6 +412,7 @@ export default function Home() {
                     </article>
                   ))}
                 </div>
+                </>
               )}
             </div>
           )}
@@ -411,7 +422,7 @@ export default function Home() {
         Listings come from{" "}
         <a href="https://aidevboard.com" target="_blank" rel="noreferrer">AI Dev Jobs</a>,{" "}
         <a href="https://www.arbeitnow.com" target="_blank" rel="noreferrer">Arbeitnow</a> and{" "}
-        <a href="https://www.themuse.com" target="_blank" rel="noreferrer">The Muse</a>. Matching is keyword overlap, not machine learning.
+        <a href="https://www.themuse.com" target="_blank" rel="noreferrer">The Muse</a>, plus <a href="https://developer.adzuna.com" target="_blank" rel="noreferrer">Adzuna</a> for India when configured. Matching is keyword overlap, not machine learning.
       </footer>
     </div>
   );

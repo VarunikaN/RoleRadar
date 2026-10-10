@@ -2,12 +2,7 @@
 
 RoleRadar matches a resume to current job listings in **any field** (finance, healthcare, teaching, sales, design, engineering, software and more) using only skills that appear in both the resume and the listing.
 
-It is a small product with two interfaces that share the same matching idea:
-
-- a **terminal app** for guided resume intake, local job caching, and slash-command search
-- a **web app** for resume upload, target-role selection, and ranked live listings
-
-A skill is counted as a match only when it is present in the job title, description, requirements, or tags. The score is the share of the candidate's extracted skills that also appear in the listing. Jobs that share no skill are not shown.
+Upload a resume, and RoleRadar extracts the skills it can verify on the page, suggests a target role, fetches live listings from several job boards, and ranks them by how much of your skill set each listing mentions. A skill counts as a match only when it appears in the job title, description, requirements, or tags. Jobs that share no skill are not shown.
 
 ## AI domain
 
@@ -24,36 +19,25 @@ Every score can be reproduced by hand from the listing text. The trade-off is th
 
 ## Features
 
-- Resume intake from PDF, TXT, Markdown, pasted text, or a public GitHub / Google Drive HTTPS link
+- Resume intake from PDF, TXT, Markdown, or a public GitHub / Google Drive HTTPS link
 - A shared vocabulary of 398 skills in 21 fields, with 84 aliases (for example `k8s`, `nodejs`, `powerbi`)
 - A suggested role and up to three fields, taken from the categories of the skills found in the resume
 - Measurable results: resume sentences that contain a percentage, an amount, or a count, quoted as written
-- Target role, seniority, market, and remote-only controls
-- Ranked results with matched skills and gaps (skills the listing asks for that the resume lacks)
-- Local SQLite cache for the terminal app so later sessions can run offline
-- Optional India listings through [Adzuna](https://developer.adzuna.com/) when credentials are set
+- Target role, seniority, market, and remote-only controls; the target role is pre-filled from the resume
+- Ranked results with matched skills, skill gaps (skills the listing asks for that the resume lacks), and the source of each listing
+- An "in demand" summary of the most frequently mentioned skills across the retrieved listings
+- Light and dark themes
 
 ## Job sources
 
 | Source | Coverage | Notes |
 | --- | --- | --- |
 | [AI Dev Jobs](https://aidevboard.com/openapi.yaml) | Tech, AI and adjacent roles, with skill tags | Server-side text search |
-| [Arbeitnow](https://www.arbeitnow.com/api/job-board-api) | Mixed fields, Europe-heavy, many German listings | One feed of about 300 jobs, fetched once per hour and filtered locally |
-| [The Muse](https://www.themuse.com/developers/api/v2) | Mixed fields, US-heavy | No text search, so RoleRadar maps the role to a Muse category and filters locally |
-| [Adzuna](https://developer.adzuna.com/) (optional) | India | Needs `ADZUNA_APP_ID` and `ADZUNA_APP_KEY` |
+| [Arbeitnow](https://www.arbeitnow.com/api/job-board-api) | Mixed fields, Europe-heavy, many German listings | One feed of about 300 jobs, fetched at most once per hour and filtered locally |
+| [The Muse](https://www.themuse.com/developers/api/v2) | Mixed fields, US-heavy | No text search, so the role is mapped to a Muse category and filtered locally |
+| [Adzuna](https://developer.adzuna.com/) (optional) | India | Used when the market is India and `ADZUNA_APP_ID` and `ADZUNA_APP_KEY` are set on the server |
 
 One failing source becomes a warning and the others still answer; RoleRadar reports an error only when every source fails. Each listing shows which source it came from.
-
-## Error handling
-
-Bad input is reported, not guessed at:
-
-- An unknown target role reports "No roles found" after a live lookup, instead of ranking unrelated cached jobs.
-- Empty, binary, image, scanned, encrypted, oversized, or non-resume files are rejected with a specific reason in both apps.
-- Resume links must be HTTPS. The terminal app blocks private and loopback addresses and re-checks every redirect; the web app only fetches an allowlist of hosts and returns text only.
-- Skill names you type are validated; single letters and non-skills are ignored and listed back to you.
-- A job source that is rate limited, offline, or returning malformed data produces a named warning. The terminal app keeps working from its cache.
-- Listing text is escaped before it is printed, so titles such as `[Remote]` cannot break the terminal display. URLs inside text are ignored when matching, so `privacy.html` is not read as an HTML skill.
 
 ## How matching works
 
@@ -66,74 +50,62 @@ resume
   -> rank, and list gaps from listing tags and from vocabulary skills found in the listing text
 ```
 
-The suggested role comes from the field with the most skills in the resume (for example Finance & accounting suggests Accountant). If no skill is recognised, no role is suggested and you are asked to type one.
+Matching is whole-word on both sides, so `sql` does not match `PostgreSQL` or `SQLite`, `git` does not match `GitHub`, and `c++` does not match `c#`. Web addresses inside text are ignored, so `privacy.html` is not read as an HTML skill.
 
-## Known limitations
+The suggested role comes from the field with the most skills in the resume (for example Finance & accounting suggests Accountant). If no skill is recognised, no role is suggested and you type one.
 
-- Only skills in the vocabulary are recognised. A skill that is not in it (for example `tally`) is ignored unless you type it as an extra skill.
-- Arbeitnow listings are largely German, so English skill terms match only some of them.
-- The Muse has no text search, so recall for a role is limited to the first two pages of its mapped categories.
-- Coverage of trades and other roles that are rarely posted on tech-leaning boards is thin; for example a search for `welder` returns only a few listings.
-- A typed skill such as `go` can match unrelated text like "go-to-market".
-- The web rate limiter is in memory, so it applies per server instance.
-- There is no labelled evaluation of ranking quality; scores are overlap percentages, not predictions.
+## Error handling
 
-## Terminal app
+Bad input is reported, not guessed at:
 
-Python 3.10+.
+- An unknown target role reports "No roles found" instead of ranking unrelated jobs.
+- Empty, binary, image, scanned, encrypted, oversized, or non-resume files are rejected with a specific reason.
+- Resume links must be plain HTTPS addresses on an allowlist of hosts (GitHub and Google Drive). Redirects are re-checked, bodies are capped at 2 MB, and only text is read.
+- Skill names you type are validated; single letters and non-skills are ignored and listed back to you.
+- A job source that is rate limited, offline, or returning malformed data produces a named warning. Apply links are only kept if they are `http` or `https`.
+- Upload, link and job routes are rate limited per client.
 
-```bash
-python3 -m venv .venv
-.venv/bin/pip install -e ".[dev]"
-.venv/bin/roleradar
-```
+## Run locally
 
-On first launch, RoleRadar downloads live roles and stores them in `~/.roleradar/roleradar.db`. Refresh the cache without opening the interactive session:
+Node.js 20 or later.
 
 ```bash
-.venv/bin/roleradar --sync
-```
-
-| Command | Action |
-| --- | --- |
-| `/profile` | Show the extracted profile and current matches |
-| `/market` | Show demand signals from cached job tags |
-| `/search <query>` | Search a different role focus |
-| `/open N` | Inspect listing `N` |
-| `/refresh` | Resync live jobs |
-| `/quit` | Exit |
-
-## Web app
-
-```bash
-cd web
 npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Upload a resume to extract skills and scan listings immediately; the target role is pre-filled from the resume and can be changed. Change the target role in the sidebar and rescan at any time. Light and dark themes are available.
+Open [http://localhost:3000](http://localhost:3000), upload a resume, and change the target role or filters at any time.
 
-To deploy on Vercel, import this repository and set the project **Root Directory** to `web`. No API key is required for the default job sources.
+India listings are optional. Copy `.env.example` to `.env.local` and fill in free [Adzuna](https://developer.adzuna.com/) credentials. They are read on the server only and are never sent to the browser.
 
-Matching is whole-word on both sides, so `sql` does not match `PostgreSQL` or `SQLite`, `git` does not match `GitHub`, and `c++` does not match `c#`. The terminal and web apps read the same `skills.json` and are tested against the same vectors in `tests/parity.json`.
+## Deploy
+
+Import the repository into Vercel. No configuration is required for the default job sources. Add `ADZUNA_APP_ID` and `ADZUNA_APP_KEY` as environment variables to enable India listings.
 
 ## Tests
 
 ```bash
-.venv/bin/pytest
-```
-
-```bash
-cd web
 npm test
 npm run lint
 npm run build
 ```
 
+`npm test` runs 94 tests with the network replaced by mocks. `npm run lint` is a TypeScript type check.
+
+## Known limitations
+
+- Only skills in the vocabulary are recognised. A skill that is not in it (for example `tally`) is ignored unless you add it as an extra skill.
+- Arbeitnow listings are largely German, so English skill terms match only some of them.
+- The Muse has no text search, so recall for a role is limited to the first two pages of its mapped categories.
+- Coverage of trades and other roles rarely posted on tech-leaning boards is thin; a search for `welder` returns only a few listings.
+- An extra skill such as `go` can match unrelated text like "go-to-market".
+- The rate limiter and the Arbeitnow cache are in memory, so they apply per server instance.
+- There is no labelled evaluation of ranking quality; scores are overlap percentages, not predictions.
+
 ## Project layout
 
 ```text
-roleradar/     terminal app: intake, matching, job sources, SQLite cache, skills.json
-tests/         matching, intake, store, job-source tests and parity.json
-web/           Next.js app, API routes, lib/ (matching, guards, sources), vitest tests
+app/            Next.js pages and the /api/jobs and /api/resume routes
+lib/            skills.json, matching, input guards, job sources
+tests/          vitest suites and the shared fixtures in fixtures.json
 ```

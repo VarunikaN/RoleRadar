@@ -11,8 +11,9 @@ export async function GET(request: NextRequest) {
   const query = cleanQuery(request.nextUrl.searchParams.get("q"), "");
   const remote = request.nextUrl.searchParams.get("remote") === "true";
   const level = mapLevel(request.nextUrl.searchParams.get("level"));
+  const india = request.nextUrl.searchParams.get("india") === "true";
   try {
-    const { jobs, warnings } = await fetchAll(query, remote, level);
+    const { jobs, warnings } = await fetchAll(query, remote, level, india);
     return NextResponse.json({ jobs: jobs.slice(0, MAX_JOBS), warnings, query });
   } catch (error) {
     if (error instanceof SourceError && error.status === 429) {
