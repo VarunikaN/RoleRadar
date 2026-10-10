@@ -7,14 +7,27 @@ from pathlib import Path
 
 from rich import box
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 from rich.text import Text
 from rich.columns import Columns
 
-from .profile import fetch_resume_link, profile_report, read_resume_file
-from .service import match_jobs, sync, top_skills
+import sqlite3
+import sys
+
+from .profile import check_resume_text, fetch_resume_link, profile_report, read_resume_file
+from .service import (
+    JobSourceError,
+    adzuna_configured,
+    clean_query,
+    find_roles,
+    job_skills,
+    sync,
+    top_skills,
+)
+from .skills import clean_skill_list
 from .store import JobStore
 
 console = Console()
@@ -30,54 +43,64 @@ def banner() -> None:
     title = Text("ROLE", style="bold white")
     title.append("RADAR", style="bold bright_cyan")
     console.print()
-    console.print(Panel.fit(title + "  [dim]resume-to-role matching[/dim]", border_style="bright_magenta", padding=(1, 4)))
-    console.print("[dim]Parse a resume, extract verifiable skills, and rank live AI roles by listing overlap.[/dim]\n")
+    title.append("  resume-to-role matching", style="dim")
+    console.print(Panel.fit(title, border_style="bright_magenta", padding=(1, 4)))
+    console.print("[dim]Parse a resume, extract verifiable skills, and rank live roles in any field by listing overlap.[/dim]\n")
 
 
 def job_table(jobs: list[dict], title: str = "Roles") -> None:
-    table = Table(title=title, box=box.SIMPLE_HEAVY, header_style="bold bright_cyan", show_lines=True)
+    table = Table(title=escape(title), box=box.SIMPLE_HEAVY, header_style="bold bright_cyan", show_lines=True)
     table.add_column("#", style="dim", width=3)
     table.add_column("Role", style="bold", min_width=26)
     table.add_column("Company", min_width=16)
     table.add_column("Workplace", width=10)
+    table.add_column("Source", width=12)
     table.add_column("Signals", min_width=24)
     for index, job in enumerate(jobs, start=1):
         matched = ", ".join(job.get("matched_skills", [])[:4])
-        tags = matched or ", ".join(job.get("tags", [])[:4]) or "Not tagged"
-        table.add_row(str(index), job["title"], job["company_name"], job.get("workplace", "-") or "-", tags)
+        tags = matched or ", ".join(job.get("tags", [])[:4]) or "No skills detected"
+        table.add_row(
+            str(index), escape(job["title"]), escape(job.get("company_name") or "Unknown company"),
+            escape(job.get("workplace", "-") or "-"), escape(job.get("source") or "-"), escape(tags),
+        )
     console.print(table)
 
 
 def show_job(job: dict) -> None:
-    skills = ", ".join(job.get("tags", [])) or "No tagged skills"
+    skills = ", ".join(sorted(job_skills(job))) or "No known skills detected in the listing"
     description = (job.get("description") or job.get("requirements") or "No description available.").strip()
     body = (
-        f"[bold bright_cyan]{job['company_name']}[/bold bright_cyan]  |  {job.get('location') or 'Location not listed'}\n"
-        f"[dim]{job.get('workplace') or 'Workplace not listed'} | {job.get('experience_level') or 'Level not listed'}[/dim]\n\n"
-        f"[bold]Skills:[/bold] {skills}\n"
-        f"[bold]Apply:[/bold] {job.get('apply_url') or 'No application link listed'}\n\n"
-        f"{textwrap.shorten(description, width=700, placeholder='...')}"
+        f"[bold bright_cyan]{escape(job.get('company_name') or 'Unknown company')}[/bold bright_cyan]  |  {escape(job.get('location') or 'Location not listed')}\n"
+        f"[dim]{escape(job.get('workplace') or 'Workplace not listed')} | {escape(job.get('experience_level') or 'Level not listed')} | via {escape(job.get('source') or 'unknown source')}[/dim]\n\n"
+        f"[bold]Skills:[/bold] {escape(skills)}\n"
+        f"[bold]Apply:[/bold] {escape(job.get('apply_url') or 'No application link listed')}\n\n"
+        f"{escape(textwrap.shorten(description, width=700, placeholder='...'))}"
     )
-    console.print(Panel(body, title=f"[bold]{job['title']}[/bold]", border_style="bright_cyan"))
+    console.print(Panel(body, title=f"[bold]{escape(job['title'])}[/bold]", border_style="bright_cyan"))
 
 
 def refresh(database: JobStore, include_india: bool = False) -> None:
-    with console.status("[bright_cyan]Scanning live AI job sources...[/bright_cyan]", spinner="dots"):
+    with console.status("[bright_cyan]Scanning live job sources...[/bright_cyan]", spinner="dots"):
         try:
-            count = sync(database, include_india=include_india)
-        except Exception as error:
+            result = sync(database, include_india=include_india)
+        except JobSourceError as error:
             console.print(f"[yellow]Could not refresh live roles: {error}[/yellow]")
             return
-    console.print(f"[green]Radar refreshed.[/green] Cached {count} live roles.")
+    for warning in result.warnings:
+        console.print(f"[yellow]{warning}[/yellow]")
+    console.print(f"[green]Radar refreshed.[/green] Cached {result.count} live roles.")
 
 
 def paste_resume() -> str:
     console.print("Paste your resume text now. When finished, type END on a line by itself.")
     lines: list[str] = []
     while True:
-        line = input()
+        try:
+            line = input()
+        except EOFError:
+            return check_resume_text("\n".join(lines))
         if line.strip() == "END":
-            return "\n".join(lines)
+            return check_resume_text("\n".join(lines))
         lines.append(line)
 
 
@@ -105,22 +128,22 @@ def prompt_resume_file() -> str:
             return ""
         try:
             return read_resume_file(source)
-        except Exception as error:
+        except (ValueError, OSError) as error:
             console.print(f"[yellow]I could not read that file: {error}[/yellow]")
             if not Confirm.ask("Try another file path", default=True):
                 return ""
 
 
 def show_briefing(report: dict[str, list[str] | str], text: str) -> None:
-    pillars = report["pillars"] or ["Machine learning"]
-    proof_points = report["proof_points"] or ["Resume loaded, but I could not find measurable proof points yet."]
+    pillars = report["pillars"] or ["No clear field detected yet"]
+    proof_points = report["proof_points"] or ["No sentence with a measurable result (a %, an amount, a count) was found in the resume."]
     preview = textwrap.shorten(" ".join(text.split()), width=220, placeholder="...")
     body = (
-        f"[bold]{report['headline']}[/bold]\n\n"
-        f"[bright_cyan]Themes[/bright_cyan]  {'  |  '.join(pillars)}\n\n"
-        f"[bright_cyan]Proof[/bright_cyan]\n"
-        + "\n".join(f"[green]•[/green] {point}" for point in proof_points)
-        + f"\n\n[dim]Preview: {preview}[/dim]"
+        f"[bold]{report['headline'] or 'Role not inferred'}[/bold]\n\n"
+        f"[bright_cyan]Fields[/bright_cyan]  {escape('  |  '.join(pillars))}\n\n"
+        f"[bright_cyan]Measurable results[/bright_cyan]\n"
+        + "\n".join(f"[green]•[/green] {escape(point)}" for point in proof_points)
+        + f"\n\n[dim]Preview: {escape(preview)}[/dim]"
     )
     console.print(Panel(body, title="[bold bright_cyan]Step 2 / Evidence briefing[/bold bright_cyan]", border_style="green"))
 
@@ -129,16 +152,16 @@ def render_overview(skills: list[str], target: str, remote: bool, include_india:
     pillars = report.get("pillars", [])
     proof_points = report.get("proof_points", [])
     profile = Panel(
-        f"[bold]{report['headline']}[/bold]\n"
-        f"[dim]{target}[/dim]\n\n"
+        f"[bold]{report['headline'] or 'Role not inferred'}[/bold]\n"
+        f"[dim]{escape(target)}[/dim]\n\n"
         f"[bright_cyan]Skills tracked[/bright_cyan]  {len(skills)}\n"
-        f"[bright_cyan]Themes[/bright_cyan]  {len(pillars)}\n"
-        f"[bright_cyan]Proof points[/bright_cyan]  {len(proof_points)}",
+        f"[bright_cyan]Fields[/bright_cyan]  {len(pillars)}\n"
+        f"[bright_cyan]Measurable results[/bright_cyan]  {len(proof_points)}",
         title="[bold bright_magenta]Profile[/bold bright_magenta]",
         border_style="bright_magenta",
     )
     radar = Panel(
-        f"[bright_cyan]Market[/bright_cyan]  {'India-aware' if include_india else 'Global AI jobs'}\n"
+        f"[bright_cyan]Market[/bright_cyan]  {'India-aware' if include_india else 'Global listings'}\n"
         f"[bright_cyan]Remote filter[/bright_cyan]  {'on' if remote else 'off'}\n"
         f"[bright_cyan]Cached roles[/bright_cyan]  {database.count()}\n"
         f"[bright_cyan]Data dir[/bright_cyan]  {DATA_PATH}",
@@ -163,11 +186,11 @@ def show_market(database: JobStore) -> None:
     if not pulse:
         console.print("[yellow]No market data cached yet.[/yellow]")
         return
-    body = "\n".join(f"[bright_cyan]{skill:<18}[/bright_cyan] {count} active-role mentions" for skill, count in pulse)
+    body = "\n".join(f"[bright_cyan]{escape(skill):<18}[/bright_cyan] {count} active-role mentions" for skill, count in pulse)
     console.print(Panel(body, title="[bold bright_magenta]Market pulse[/bold bright_magenta]", border_style="bright_magenta"))
 
 
-def introduce_candidate() -> tuple[list[str], bool, str, bool, dict[str, list[str] | str]]:
+def introduce_candidate() -> tuple[list[str], bool, str, bool, str, dict[str, list[str] | str]]:
     console.print(
         Panel(
             "This session reads only the evidence already present in your resume. Nothing is uploaded or saved.\n"
@@ -186,38 +209,84 @@ def introduce_candidate() -> tuple[list[str], bool, str, bool, dict[str, list[st
         elif source == "link":
             console.print("Paste a public HTTPS text or Markdown resume link. PDF links are still handled as local files.")
             text = fetch_resume_link(Prompt.ask("Resume link"))
-    except Exception as error:
+    except (ValueError, OSError) as error:
         console.print(f"[yellow]I could not read that resume: {error}[/yellow]")
+        text = ""
     report = profile_report(text)
     skills = report["skills"]
-    if text:
+    if text and skills:
         show_briefing(report, text)
+    elif text:
+        console.print("[yellow]I read the text but found none of the skills I track. Is this the right document? Add your skills below.[/yellow]")
     else:
         console.print("[yellow]No resume evidence loaded, so the radar will rely on manual skills only.[/yellow]")
     console.print("\n[bold bright_cyan]Step 3 / Calibrate the search[/bold bright_cyan]")
-    console.print("What role should I optimize for? Example: Applied AI Engineer")
-    target = Prompt.ask("Target role", default=str(report["headline"]))
+    console.print("What role should I optimize for? Any field works. Examples: Accountant, Data Analyst, Registered Nurse, Software Engineer")
+    suggestion = str(report["headline"])
+    target = ""
+    for _ in range(3):
+        target = clean_query(Prompt.ask("Target role", default=suggestion) if suggestion else Prompt.ask("Target role"))
+        if target:
+            break
+        console.print("[yellow]Enter a job title, for example Accountant.[/yellow]")
+    if not target:
+        raise SystemExit("No target role given. Re-run and enter a job title such as Accountant or Data Analyst.")
     console.print("Where can you work? Example: India, Hyderabad, remote worldwide")
     location = Prompt.ask("Location preference", default="India")
     console.print("What is your level?")
     level = Prompt.ask("Experience level", choices=["student", "junior", "mid", "senior"], default="student")
     console.print("Should I show only remote roles?")
     remote = Confirm.ask("Remote only", default=False)
-    manual_default = ", ".join(skills[:8]) or "python, pytorch, llm, fastapi"
-    manual = Prompt.ask("Add any skills the resume missed", default=manual_default)
-    all_skills = list(dict.fromkeys(skills + [skill.strip().lower() for skill in manual.split(",") if skill.strip()]))
+    all_skills = list(skills)
+    for attempt in range(3):
+        manual = Prompt.ask("Add any skills the resume missed (comma-separated, any field)", default="")
+        added, rejected = clean_skill_list(manual.split(","))
+        if rejected:
+            console.print(f"[yellow]Ignored: {', '.join(rejected)}[/yellow]")
+        all_skills = list(dict.fromkeys(skills + added))
+        if all_skills:
+            break
+        console.print("[yellow]I need at least one skill to match against. Example: microsoft excel, nursing, python, seo[/yellow]")
+    if not all_skills:
+        raise SystemExit("No skills to match. Re-run with a text-based resume or type a few skills like: microsoft excel, sql, seo.")
     console.print(
         Panel(
-            f"[bright_cyan]Target[/bright_cyan]  {target}\n"
-            f"[bright_cyan]Location[/bright_cyan]  {location}\n"
+            f"[bright_cyan]Target[/bright_cyan]  {escape(target)}\n"
+            f"[bright_cyan]Location[/bright_cyan]  {escape(location)}\n"
             f"[bright_cyan]Level[/bright_cyan]  {level}\n"
             f"[bright_cyan]Remote only[/bright_cyan]  {'yes' if remote else 'no'}\n"
-            f"[bright_cyan]Tracked skills[/bright_cyan]  {', '.join(all_skills) or 'none'}",
+            f"[bright_cyan]Tracked skills[/bright_cyan]  {escape(', '.join(all_skills)) or 'none'}",
             title="[bold bright_cyan]Step 4 / Radar settings[/bold bright_cyan]",
             border_style="bright_magenta",
         )
     )
-    return all_skills, location.lower() == "india", target, remote, report
+    return all_skills, "india" in location.lower(), target, remote, level, report
+
+
+def run_search(
+    database: JobStore,
+    target: str,
+    skills: list[str],
+    remote: bool,
+    level: str,
+    include_india: bool,
+    live: bool = True,
+) -> list[dict]:
+    with console.status("[bright_cyan]Searching roles...[/bright_cyan]", spinner="dots"):
+        outcome = find_roles(database, target, skills, remote, level, include_india, live)
+    for note in outcome.notes:
+        console.print(f"[yellow]{note}[/yellow]")
+    if outcome.roles_found == 0:
+        console.print(
+            f"[yellow]No roles found for '{escape(target)}'. That title may not exist in the job feeds. "
+            "Try a broader title such as 'analyst', 'manager' or 'engineer'.[/yellow]"
+        )
+    elif not outcome.matches:
+        console.print(
+            f"[yellow]Found {outcome.roles_found} roles for '{escape(target)}', but none list a skill that is on your resume. "
+            "I only match skills that appear in both.[/yellow]"
+        )
+    return outcome.matches
 
 
 def interactive() -> None:
@@ -225,10 +294,10 @@ def interactive() -> None:
     banner()
     if database.count() == 0:
         refresh(database)
-    skills, include_india, target, remote, report = introduce_candidate()
-    if include_india and not os.getenv("ADZUNA_APP_ID"):
-        console.print("[yellow]A note on India: the free AI-only source is US-heavy. Add free Adzuna credentials later to pull India-specific roles.[/yellow]")
-    matches = match_jobs(database.search(target, remote, limit=30) or database.all_jobs(), skills)
+    skills, include_india, target, remote, level, report = introduce_candidate()
+    if include_india and not adzuna_configured():
+        console.print("[yellow]A note on India: the free sources skew to the US and Europe. Add free Adzuna credentials to pull India-specific roles in any field.[/yellow]")
+    matches = run_search(database, target, skills, remote, level, include_india)
     render_overview(skills, target, remote, include_india, report, database)
     if matches:
         job_table(matches, "Radar matches")
@@ -236,15 +305,13 @@ def interactive() -> None:
             console.print(
                 Panel(
                     f"[bright_cyan]{job['match_score']}% fit[/bright_cyan]\n"
-                    f"[bold]{job['title']}[/bold] at {job['company_name']}\n"
-                    f"[green]Matched[/green]  {', '.join(job['matched_skills'])}\n"
-                    f"[yellow]Build next[/yellow]  {', '.join(job['missing_skills']) or 'no tagged gaps'}",
+                    f"[bold]{escape(job['title'])}[/bold] at {escape(job.get('company_name') or 'Unknown company')}\n"
+                    f"[green]Matched[/green]  {escape(', '.join(job['matched_skills']))}\n"
+                    f"[yellow]Build next[/yellow]  {escape(', '.join(job['missing_skills']) or 'no gaps detected')}",
                     border_style="green",
                 )
             )
-    else:
-        console.print("[yellow]I found no supported matches in the current cache. Say refresh to scan again or try a broader target next time.[/yellow]")
-    console.print("\n[dim]Use slash commands like /market, /search applied ai engineer, /open 1, /profile, /refresh, or /quit.[/dim]")
+    console.print("\n[dim]Use slash commands like /market, /search data analyst, /open 1, /profile, /refresh, or /quit.[/dim]")
     while True:
         request = Prompt.ask("[bright_magenta]Command[/bright_magenta]").strip()
         normalized = request.lower()
@@ -259,20 +326,19 @@ def interactive() -> None:
                 job_table(matches, "Radar matches")
         elif normalized in {"refresh", "/refresh"}:
             refresh(database, include_india)
-            matches = match_jobs(database.search(target, remote, limit=30) or database.all_jobs(), skills)
+            matches = run_search(database, target, skills, remote, level, include_india, live=False)
             if matches:
                 job_table(matches, "Radar matches")
-        elif normalized.startswith("search") or normalized.startswith("/search"):
-            query = normalized.removeprefix("/search").removeprefix("search").strip() or target
-            jobs = database.search(query, remote)
-            scoped = match_jobs(jobs or database.all_jobs(), skills)
+        elif normalized.split(" ", 1)[0] in {"search", "/search"}:
+            query = clean_query(normalized.split(" ", 1)[1]) if " " in normalized else target
+            scoped = run_search(database, query, skills, remote, level, include_india)
             if scoped:
                 matches = scoped
                 job_table(scoped, f"Results for: {query}")
-            else:
-                console.print("[yellow]No cached results for that focus.[/yellow]")
-        elif normalized.startswith("open ") or normalized.startswith("/open "):
-            index_text = normalized.removeprefix("/open ").removeprefix("open ").strip()
+        elif not normalized:
+            continue
+        elif normalized.split(" ", 1)[0] in {"open", "/open"}:
+            index_text = normalized.split(" ", 1)[1].strip() if " " in normalized else ""
             if not index_text.isdigit():
                 console.print("[yellow]Use /open 1 or /open 2.[/yellow]")
                 continue
@@ -282,14 +348,20 @@ def interactive() -> None:
                 continue
             show_job(matches[index])
         else:
-            console.print("[dim]Try /market, /profile, /search computer vision, /open 1, /refresh, or /quit.[/dim]")
+            console.print("[dim]Try /market, /profile, /search nurse, /open 1, /refresh, or /quit.[/dim]")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="RoleRadar AI job-market intelligence")
+    parser = argparse.ArgumentParser(description="RoleRadar resume-to-role matching for any field")
     parser.add_argument("--sync", action="store_true", help="Refresh the local job cache and exit")
     arguments = parser.parse_args()
-    if arguments.sync:
-        refresh(store())
-        return
-    interactive()
+    try:
+        if arguments.sync:
+            refresh(store())
+            return
+        interactive()
+    except (KeyboardInterrupt, EOFError):
+        console.print("\n[bright_cyan]Exiting.[/bright_cyan]")
+    except (sqlite3.Error, OSError) as error:
+        console.print(f"[red]Could not open the local job cache in {DATA_PATH}: {error}[/red]")
+        sys.exit(1)

@@ -1,0 +1,313 @@
+{
+  "extract": [
+    {
+      "name": "aliases",
+      "text": "I use Torch and sklearn daily",
+      "skills": [
+        "pytorch",
+        "scikit-learn"
+      ]
+    },
+    {
+      "name": "single letters are never skills",
+      "text": "Built things in R and Go and C",
+      "skills": []
+    },
+    {
+      "name": "plus and hash are part of the token",
+      "text": "Experienced with C++ and C#",
+      "skills": [
+        "c++",
+        "c#"
+      ]
+    },
+    {
+      "name": "hyphen and abbreviations",
+      "text": "Worked on machine-learning and ML pipelines; Kubernetes (k8s)",
+      "skills": [
+        "kubernetes",
+        "machine learning"
+      ]
+    },
+    {
+      "name": "sql is not inside postgresql or sqlite",
+      "text": "Postgres, PostgreSQL, SQLite",
+      "skills": [
+        "postgresql",
+        "sqlite"
+      ]
+    },
+    {
+      "name": "no substring hits",
+      "text": "Pythonic code and pythons",
+      "skills": []
+    },
+    {
+      "name": "git is not github",
+      "text": "Gitlab and github",
+      "skills": []
+    },
+    {
+      "name": "phrases",
+      "text": "Led NLP, natural language processing, and large language models work",
+      "skills": [
+        "llm",
+        "nlp"
+      ]
+    },
+    {
+      "name": "rag is not garbage",
+      "text": "rag-based RAG; garbage, storage",
+      "skills": [
+        "rag"
+      ]
+    },
+    {
+      "name": "dots in names",
+      "text": "Machine learning with LLaMA.cpp",
+      "skills": [
+        "machine learning",
+        "llama.cpp"
+      ]
+    },
+    {
+      "name": "finance terms",
+      "text": "Managed accounts payable, payroll and QuickBooks; audit support",
+      "skills": [
+        "quickbooks",
+        "accounts payable",
+        "auditing",
+        "payroll"
+      ]
+    },
+    {
+      "name": "healthcare terms",
+      "text": "Registered nurse providing patient care, triage and CPR",
+      "skills": [
+        "patient care",
+        "nursing",
+        "cpr",
+        "triage"
+      ]
+    },
+    {
+      "name": "marketing and tools",
+      "text": "Ran SEO and email marketing in Google Analytics; built dashboards in Power BI and MS Excel",
+      "skills": [
+        "power bi",
+        "microsoft excel",
+        "seo",
+        "google analytics",
+        "email marketing"
+      ]
+    },
+    {
+      "name": "go and r need exact typing",
+      "text": "Went to the go-to-market review; R&D team",
+      "skills": []
+    },
+    {
+      "name": "links are not skills",
+      "text": "Read the policy at https://example.com/privacy.html and www.site.org/python.html; ran SQL",
+      "skills": [
+        "sql"
+      ]
+    }
+  ],
+  "match": [
+    {
+      "name": "alias on the resume side",
+      "skills": [
+        "python",
+        "torch",
+        "go"
+      ],
+      "job": {
+        "title": "AI Engineer",
+        "description": "Python and PyTorch required",
+        "requirements": "",
+        "tags": [
+          "Python",
+          "PyTorch"
+        ]
+      },
+      "matched": [
+        "python",
+        "pytorch"
+      ],
+      "score": 67,
+      "missing": []
+    },
+    {
+      "name": "alias on the job side",
+      "skills": [
+        "machine learning"
+      ],
+      "job": {
+        "title": "ML Engineer",
+        "description": "",
+        "requirements": "",
+        "tags": [
+          "ML",
+          "Docker"
+        ]
+      },
+      "matched": [
+        "machine learning"
+      ],
+      "score": 100,
+      "missing": [
+        "docker"
+      ]
+    },
+    {
+      "name": "sql does not match postgresql or sqlite",
+      "skills": [
+        "sql"
+      ],
+      "job": {
+        "title": "Data Engineer",
+        "description": "Experience with PostgreSQL and SQLite",
+        "requirements": "",
+        "tags": []
+      },
+      "matched": [],
+      "score": 0,
+      "missing": []
+    },
+    {
+      "name": "c++ is not c#",
+      "skills": [
+        "c++"
+      ],
+      "job": {
+        "title": "Senior C++ developer, not C#",
+        "description": "",
+        "requirements": "",
+        "tags": []
+      },
+      "matched": [
+        "c++"
+      ],
+      "score": 100,
+      "missing": [
+        "c#"
+      ]
+    },
+    {
+      "name": "duplicates and case collapse",
+      "skills": [
+        "pytorch",
+        "TensorFlow",
+        "pytorch"
+      ],
+      "job": {
+        "title": "Vision Engineer",
+        "description": "",
+        "requirements": "",
+        "tags": [
+          "TensorFlow"
+        ]
+      },
+      "matched": [
+        "tensorflow"
+      ],
+      "score": 50,
+      "missing": []
+    },
+    {
+      "name": "rounding is half-up in both languages",
+      "skills": [
+        "python",
+        "sql",
+        "git",
+        "linux",
+        "aws",
+        "gcp",
+        "redis",
+        "docker"
+      ],
+      "job": {
+        "title": "Platform Engineer",
+        "description": "Git experience",
+        "requirements": "",
+        "tags": []
+      },
+      "matched": [
+        "git"
+      ],
+      "score": 13,
+      "missing": []
+    },
+    {
+      "name": "gaps come from listing text",
+      "skills": [
+        "payroll"
+      ],
+      "job": {
+        "title": "Accountant",
+        "description": "We need payroll, quickbooks and accounts payable experience.",
+        "requirements": "",
+        "tags": []
+      },
+      "matched": [
+        "payroll"
+      ],
+      "score": 100,
+      "missing": [
+        "accounts payable",
+        "quickbooks"
+      ]
+    }
+  ],
+  "profile": [
+    {
+      "text": "Trained PyTorch models and deployed them with Docker. Cut inference latency by 40% for 2M users.",
+      "headline": "Machine Learning Engineer",
+      "pillars": [
+        "AI & machine learning",
+        "Cloud & DevOps"
+      ],
+      "proof_points": [
+        "Cut inference latency by 40% for 2M users."
+      ]
+    },
+    {
+      "text": "Registered nurse with patient care, triage and phlebotomy experience. Reduced wait times by 15%.",
+      "headline": "Registered Nurse",
+      "pillars": [
+        "Healthcare & life sciences"
+      ],
+      "proof_points": [
+        "Reduced wait times by 15%."
+      ]
+    },
+    {
+      "text": "Accountant skilled in bookkeeping, accounts payable, payroll and quickbooks. Saved $50,000 in audit fees.",
+      "headline": "Accountant",
+      "pillars": [
+        "Finance & accounting"
+      ],
+      "proof_points": [
+        "Saved $50,000 in audit fees."
+      ]
+    },
+    {
+      "text": "- Increased revenue by 37.5% in 2 quarters across 12 accounts.\nWorked with teams. Reduced churn from 8% to 5% for 40k customers. Short 5%\nSales, salesforce and negotiation.",
+      "headline": "Sales Executive",
+      "pillars": [
+        "Sales"
+      ],
+      "proof_points": [
+        "Increased revenue by 37.5% in 2 quarters across 12 accounts.",
+        "Reduced churn from 8% to 5% for 40k customers."
+      ]
+    },
+    {
+      "text": "I enjoy long walks and quiet mornings.",
+      "headline": "",
+      "pillars": [],
+      "proof_points": []
+    }
+  ]
+}

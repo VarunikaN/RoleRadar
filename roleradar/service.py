@@ -1,79 +1,114 @@
 from __future__ import annotations
 
-import json
-import os
 from collections import Counter
-from datetime import UTC, datetime
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
 
+from . import sources
+from .skills import canonical, extract_vocab_skills, normalize, skills_in
+from .sources import (
+    JobSourceError,
+    adzuna_configured,
+    clean_query,
+    fetch_aidev,
+    fetch_all,
+    fetch_india_jobs,
+)
 from .store import JobStore
 
-API_URL = "https://aidevboard.com/api/v1/jobs"
-ADZUNA_URL = "https://api.adzuna.com/v1/api/jobs"
+fetch_jobs = fetch_aidev
+LEVELS = sources.LEVELS
 
 
-def fetch_jobs(query: str = "", remote_only: bool = False, limit: int = 50) -> list[dict[str, Any]]:
-    params: dict[str, Any] = {"limit": min(limit, 50)}
-    if query:
-        params["q"] = query
-    if remote_only:
-        params["workplace"] = "remote"
-    request = Request(f"{API_URL}?{urlencode(params)}", headers={"User-Agent": "RoleRadar/0.1"})
-    with urlopen(request, timeout=20) as response:
-        payload = json.load(response)
-    return payload.get("jobs", [])
+@dataclass
+class SyncResult:
+    count: int
+    warnings: list[str] = field(default_factory=list)
 
 
-def fetch_india_jobs(query: str = "AI engineer", limit: int = 50) -> list[dict[str, Any]]:
-    """Fetch Indian roles only when the user has configured their own Adzuna key."""
-    app_id, app_key = os.getenv("ADZUNA_APP_ID"), os.getenv("ADZUNA_APP_KEY")
-    if not app_id or not app_key:
-        return []
-    params = {"app_id": app_id, "app_key": app_key, "what": query, "results_per_page": min(limit, 50)}
-    request = Request(f"{ADZUNA_URL}/in/search/1?{urlencode(params)}", headers={"User-Agent": "RoleRadar/0.2"})
-    with urlopen(request, timeout=20) as response:
-        results = json.load(response).get("results", [])
-    return [
-        {
-            "id": f"adzuna-{job['id']}", "title": job.get("title", "Untitled role"),
-            "company_name": job.get("company", {}).get("display_name", "Unknown company"),
-            "description": job.get("description", ""), "requirements": "",
-            "location": job.get("location", {}).get("display_name", "India"), "workplace": "onsite or unspecified",
-            "experience_level": "", "tags": [], "apply_url": job.get("redirect_url", ""),
-            "created_at": job.get("created", ""),
-        }
-        for job in results
-    ]
-
-
-def sync(store: JobStore, query: str = "", remote_only: bool = False, include_india: bool = False) -> int:
-    jobs = fetch_jobs(query, remote_only)
+def sync(
+    store: JobStore,
+    query: str = "",
+    remote_only: bool = False,
+    include_india: bool = False,
+    level: str | None = None,
+) -> SyncResult:
+    jobs, warnings = fetch_all(query, remote_only, level)
     if include_india:
-        jobs.extend(fetch_india_jobs(query or "AI engineer"))
-    return store.upsert_jobs(jobs, datetime.now(UTC).isoformat())
+        if not adzuna_configured():
+            warnings.append("India listings skipped: set ADZUNA_APP_ID and ADZUNA_APP_KEY to enable them.")
+        else:
+            try:
+                jobs.extend(fetch_india_jobs(query))
+            except JobSourceError as error:
+                warnings.append(f"India listings skipped: {error}")
+    return SyncResult(store.upsert_jobs(jobs, datetime.now(timezone.utc).isoformat()), warnings)
+
+
+@dataclass
+class SearchOutcome:
+    matches: list[dict[str, Any]]
+    roles_found: int
+    notes: list[str] = field(default_factory=list)
+
+
+MIN_CACHED_ROLES = 5
+SEARCH_LIMIT = 60
+
+
+def find_roles(
+    store: JobStore,
+    target: str,
+    skills: list[str],
+    remote_only: bool = False,
+    level: str | None = None,
+    include_india: bool = False,
+    live: bool = True,
+) -> SearchOutcome:
+    query = clean_query(target)
+    notes: list[str] = []
+    roles = store.search(query, remote_only, limit=SEARCH_LIMIT, level=level)
+    if live and len(roles) < MIN_CACHED_ROLES:
+        try:
+            notes.extend(sync(store, query, remote_only, include_india, level).warnings)
+        except JobSourceError as error:
+            notes.append(str(error))
+        roles = store.search(query, remote_only, limit=SEARCH_LIMIT, level=level)
+    if not roles and level in LEVELS:
+        roles = store.search(query, remote_only, limit=SEARCH_LIMIT)
+        if roles:
+            notes.append(f"No {level}-level roles listed for '{query}'; showing every level.")
+    return SearchOutcome(match_jobs(roles, skills), len(roles), notes)
 
 
 def match_jobs(jobs: list[dict[str, Any]], skills: list[str], limit: int = 8) -> list[dict[str, Any]]:
-    normalized_skills = {skill.strip().lower() for skill in skills if skill.strip()}
+    candidate = list(dict.fromkeys(canonical(skill) for skill in skills if skill and skill.strip()))
+    if not candidate:
+        return []
     matches: list[dict[str, Any]] = []
     for job in jobs:
-        text = " ".join(
-            [job.get("title", ""), job.get("description", ""), job.get("requirements", ""), " ".join(job.get("tags", []))]
-        ).lower()
-        matched = sorted(skill for skill in normalized_skills if skill in text)
+        matched = sorted(skills_in(job_text(job), candidate))
         if not matched:
             continue
         job = job.copy()
         job["matched_skills"] = matched
-        job["match_score"] = round(100 * len(matched) / max(len(normalized_skills), 1))
-        job_tags = {tag.lower() for tag in job.get("tags", [])}
-        job["missing_skills"] = sorted(tag for tag in job_tags if tag and tag not in normalized_skills)[:6]
+        job["match_score"] = int(100 * len(matched) / len(candidate) + 0.5)
+        job["missing_skills"] = sorted(job_skills(job) - set(candidate))[:6]
         matches.append(job)
-    return sorted(matches, key=lambda job: (job["match_score"], job.get("created_at", "")), reverse=True)[:limit]
+    return sorted(matches, key=lambda job: (job["match_score"], job.get("created_at") or ""), reverse=True)[:limit]
+
+
+def job_text(job: dict[str, Any]) -> str:
+    tags = " ".join(str(tag) for tag in (job.get("tags") or []))
+    return " ".join([str(job.get("title") or ""), str(job.get("description") or ""), str(job.get("requirements") or ""), tags])
+
+
+def job_skills(job: dict[str, Any]) -> set[str]:
+    tags = {canonical(str(tag)) for tag in (job.get("tags") or []) if normalize(str(tag))}
+    return tags | set(extract_vocab_skills(job_text(job)))
 
 
 def top_skills(jobs: list[dict[str, Any]], limit: int = 8) -> list[tuple[str, int]]:
-    tags = Counter(tag.lower() for job in jobs for tag in job.get("tags", []))
-    return tags.most_common(limit)
+    counts = Counter(skill for job in jobs for skill in job_skills(job))
+    return sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:limit]

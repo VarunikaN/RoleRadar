@@ -2,8 +2,22 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from itertools import islice
 from pathlib import Path
 from typing import Any
+
+from .sources import query_matches
+
+LEVEL_GROUPS = {
+    "junior": ("junior",),
+    "mid": ("mid",),
+    "senior": ("senior", "lead", "principal"),
+}
+
+
+def _like(term: str) -> str:
+    escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
 
 
 class JobStore:
@@ -24,60 +38,80 @@ class JobStore:
                 tags TEXT NOT NULL,
                 apply_url TEXT,
                 created_at TEXT,
-                fetched_at TEXT NOT NULL
+                fetched_at TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT ''
             )
             """
         )
+        columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(jobs)")}
+        if "source" not in columns:
+            self.connection.execute("ALTER TABLE jobs ADD COLUMN source TEXT NOT NULL DEFAULT ''")
         self.connection.commit()
 
     def upsert_jobs(self, jobs: list[dict[str, Any]], fetched_at: str) -> int:
         rows = [
             (
                 str(job.get("id", "")),
-                job.get("title", "Untitled role"),
-                job.get("company_name", "Unknown company"),
-                job.get("location", ""),
-                job.get("workplace", ""),
-                job.get("experience_level", ""),
-                job.get("description", ""),
-                job.get("requirements", ""),
-                json.dumps(job.get("tags", [])),
-                job.get("apply_url", ""),
-                job.get("created_at", ""),
+                job.get("title") or "Untitled role",
+                job.get("company_name") or "Unknown company",
+                job.get("location") or "",
+                job.get("workplace") or "",
+                job.get("experience_level") or "",
+                job.get("description") or "",
+                job.get("requirements") or "",
+                json.dumps(job.get("tags") or []),
+                job.get("apply_url") or "",
+                job.get("created_at") or "",
                 fetched_at,
+                job.get("source") or "",
             )
             for job in jobs
             if job.get("id")
         ]
         self.connection.executemany(
             """
-            INSERT INTO jobs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO jobs (id, title, company_name, location, workplace, experience_level, description,
+                requirements, tags, apply_url, created_at, fetched_at, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 title=excluded.title, company_name=excluded.company_name,
                 location=excluded.location, workplace=excluded.workplace,
                 experience_level=excluded.experience_level,
                 description=excluded.description, requirements=excluded.requirements,
                 tags=excluded.tags, apply_url=excluded.apply_url,
-                created_at=excluded.created_at, fetched_at=excluded.fetched_at
+                created_at=excluded.created_at, fetched_at=excluded.fetched_at, source=excluded.source
             """,
             rows,
         )
         self.connection.commit()
         return len(rows)
 
-    def search(self, query: str = "", remote_only: bool = False, limit: int = 10) -> list[dict[str, Any]]:
-        terms = f"%{query.lower()}%"
-        sql = """
-            SELECT * FROM jobs
-            WHERE (lower(title) LIKE ? OR lower(company_name) LIKE ?
-                OR lower(description) LIKE ? OR lower(tags) LIKE ?)
-        """
-        params: list[Any] = [terms, terms, terms, terms]
+    def search(
+        self,
+        query: str = "",
+        remote_only: bool = False,
+        limit: int = 10,
+        level: str | None = None,
+    ) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM jobs WHERE 1=1"
+        params: list[Any] = []
+        for word in query.lower().split():
+            term = _like(word)
+            sql += (
+                " AND (lower(title) LIKE ? ESCAPE '\\' OR lower(company_name) LIKE ? ESCAPE '\\'"
+                " OR lower(description) LIKE ? ESCAPE '\\' OR lower(tags) LIKE ? ESCAPE '\\')"
+            )
+            params.extend([term] * 4)
         if remote_only:
             sql += " AND lower(workplace) = 'remote'"
-        sql += " ORDER BY created_at DESC LIMIT ?"
-        params.append(limit)
-        return [self._job(dict(row)) for row in self.connection.execute(sql, params)]
+        group = LEVEL_GROUPS.get(level or "")
+        if group:
+            sql += f" AND lower(experience_level) IN ({', '.join('?' for _ in group)})"
+            params.extend(group)
+        sql += " ORDER BY created_at DESC"
+        jobs = (self._job(dict(row)) for row in self.connection.execute(sql, params))
+        matching = (job for job in jobs if query_matches(job, query))
+        return list(islice(matching, limit))
 
     def all_jobs(self) -> list[dict[str, Any]]:
         return [self._job(dict(row)) for row in self.connection.execute("SELECT * FROM jobs")]
@@ -87,5 +121,9 @@ class JobStore:
 
     @staticmethod
     def _job(job: dict[str, Any]) -> dict[str, Any]:
-        job["tags"] = json.loads(job["tags"])
+        try:
+            tags = json.loads(job["tags"])
+        except (TypeError, ValueError):
+            tags = []
+        job["tags"] = tags if isinstance(tags, list) else []
         return job

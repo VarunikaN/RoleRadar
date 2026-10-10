@@ -15,4 +15,4 @@ web/.env*
 web/AGENTS.md
 web/CLAUDE.md
 web/*.tsbuildinfo
-
+web/next-env.d.ts
