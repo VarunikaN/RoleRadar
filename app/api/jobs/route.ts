@@ -8,7 +8,7 @@ export async function GET(request: NextRequest) {
   if (rateLimited(clientKey(request.headers, "jobs"), 30)) {
     return NextResponse.json({ jobs: [], error: "Too many requests. Wait a minute and try again." }, { status: 429 });
   }
-  const query = cleanQuery(request.nextUrl.searchParams.get("q"), "");
+  const query = cleanQuery(request.nextUrl.searchParams.get("q"));
   const remote = request.nextUrl.searchParams.get("remote") === "true";
   const level = mapLevel(request.nextUrl.searchParams.get("level"));
   const india = request.nextUrl.searchParams.get("india") === "true";

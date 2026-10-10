@@ -6,7 +6,7 @@ const ARBEITNOW_URL = "https://www.arbeitnow.com/api/job-board-api";
 const MUSE_URL = "https://www.themuse.com/api/public/jobs";
 const TIMEOUT_MS = 10_000;
 const MAX_DESCRIPTION_CHARS = 20_000;
-export const ARBEITNOW_TTL_MS = 3_600_000;
+const ARBEITNOW_TTL_MS = 3_600_000;
 
 export type SourceJob = {
   id: string;
@@ -78,7 +78,7 @@ async function getJson(url: string, label: string): Promise<unknown> {
   }
 }
 
-export async function fetchAiDev(query: string, remote: boolean, level: string | null): Promise<SourceJob[]> {
+async function fetchAiDev(query: string, remote: boolean, level: string | null): Promise<SourceJob[]> {
   const params = new URLSearchParams({ q: query, limit: "30" });
   if (remote) params.set("workplace", "remote");
   if (level) params.set("level", level);
@@ -131,7 +131,7 @@ async function arbeitnowAll(now = Date.now()): Promise<SourceJob[]> {
   return jobs;
 }
 
-export async function fetchArbeitnow(query: string, remote: boolean): Promise<SourceJob[]> {
+async function fetchArbeitnow(query: string, remote: boolean): Promise<SourceJob[]> {
   return (await arbeitnowAll()).filter((job) => queryMatches(job, query) && (!remote || job.workplace === "remote"));
 }
 
@@ -200,7 +200,7 @@ function museJob(item: unknown): SourceJob | null {
   };
 }
 
-export async function fetchMuse(query: string, remote: boolean, level: string | null): Promise<SourceJob[]> {
+async function fetchMuse(query: string, remote: boolean, level: string | null): Promise<SourceJob[]> {
   const categories: (string | null)[] = museCategories(query);
   if (!categories.length) categories.push(null);
   const requests = categories.flatMap((category) => [1, 2].map((page) => ({ category, page })));
@@ -225,14 +225,14 @@ export async function fetchMuse(query: string, remote: boolean, level: string | 
 
 const ADZUNA_URL = "https://api.adzuna.com/v1/api/jobs/in/search/1";
 
-export function adzunaConfigured(env: Record<string, string | undefined> = process.env): boolean {
-  return Boolean(env.ADZUNA_APP_ID && env.ADZUNA_APP_KEY);
+function adzunaConfigured(): boolean {
+  return Boolean(process.env.ADZUNA_APP_ID && process.env.ADZUNA_APP_KEY);
 }
 
-export async function fetchAdzuna(query: string, env: Record<string, string | undefined> = process.env): Promise<SourceJob[]> {
+async function fetchAdzuna(query: string): Promise<SourceJob[]> {
   const params = new URLSearchParams({
-    app_id: env.ADZUNA_APP_ID ?? "",
-    app_key: env.ADZUNA_APP_KEY ?? "",
+    app_id: process.env.ADZUNA_APP_ID ?? "",
+    app_key: process.env.ADZUNA_APP_KEY ?? "",
     results_per_page: "30",
   });
   if (query) params.set("what", query);

@@ -24,14 +24,14 @@ const CATEGORY_OF = new Map<string, string>(CATEGORIES.flatMap((item) => item.sk
 const ROLE_OF = new Map<string, string>(CATEGORIES.map((item) => [item.name, item.role]));
 const CATEGORY_ORDER = new Map<string, number>(CATEGORIES.map((item, index) => [item.name, index]));
 
-export const MIN_SKILL_CHARS = 2;
-export const MAX_SKILL_CHARS = 40;
+const MIN_SKILL_CHARS = 2;
+const MAX_SKILL_CHARS = 40;
 const SKILL_SHAPE = /^[a-z0-9][a-z0-9+#.\- ]*$/;
 const WORD = "\\p{L}\\p{N}_+#";
 
 const URL_PATTERN = /(?:https?:\/\/|www\.)\S+/gi;
 
-export function normalize(text: string): string {
+function normalize(text: string): string {
   return text.toLowerCase().replace(URL_PATTERN, " ").replace(/[-_/]/g, " ").split(/\s+/).filter(Boolean).join(" ");
 }
 
@@ -47,7 +47,7 @@ function pattern(term: string): RegExp {
   return cached;
 }
 
-export function containsTerm(normalizedText: string, term: string): boolean {
+function containsTerm(normalizedText: string, term: string): boolean {
   const wanted = normalize(term);
   if (!wanted || !normalizedText.includes(wanted)) return false;
   return pattern(wanted).test(normalizedText);
@@ -63,7 +63,7 @@ const TERMS: Map<string, string[]> = (() => {
   return table;
 })();
 
-export function termsFor(skill: string): string[] {
+function termsFor(skill: string): string[] {
   return TERMS.get(skill) ?? [skill];
 }
 
@@ -78,7 +78,7 @@ export function canonical(term: string): string {
   return CANONICAL.get(cleaned) ?? cleaned;
 }
 
-export function skillsIn(text: string, skills: readonly string[]): string[] {
+function skillsIn(text: string, skills: readonly string[]): string[] {
   const normalized = normalize(text);
   return skills.filter((skill) => termsFor(skill).some((term) => containsTerm(normalized, term)));
 }
@@ -160,11 +160,11 @@ export function profileReport(text: string) {
   return { headline: suggestedRole(skills), skills, pillars: themesFor(skills), proofPoints: proofPoints(text) };
 }
 
-export function jobText(job: Job): string {
+function jobText(job: Job): string {
   return [job.title ?? "", job.description ?? "", job.requirements ?? "", (job.tags ?? []).map(String).join(" ")].join(" ");
 }
 
-export function jobSkills(job: Job): Set<string> {
+function jobSkills(job: Job): Set<string> {
   const tags = (job.tags ?? []).map(String).filter((tag) => normalize(tag)).map(canonical);
   return new Set([...tags, ...extractSkills(jobText(job))]);
 }

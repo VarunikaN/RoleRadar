@@ -35,7 +35,7 @@ Every score can be reproduced by hand from the listing text. The trade-off is th
 | [AI Dev Jobs](https://aidevboard.com/openapi.yaml) | Tech, AI and adjacent roles, with skill tags | Server-side text search |
 | [Arbeitnow](https://www.arbeitnow.com/api/job-board-api) | Mixed fields, Europe-heavy, many German listings | One feed of about 300 jobs, fetched at most once per hour and filtered locally |
 | [The Muse](https://www.themuse.com/developers/api/v2) | Mixed fields, US-heavy | No text search, so the role is mapped to a Muse category and filtered locally |
-| [Adzuna](https://developer.adzuna.com/) (optional) | India | Used when the market is India and `ADZUNA_APP_ID` and `ADZUNA_APP_KEY` are set on the server |
+| [Adzuna](https://developer.adzuna.com/) (optional) | India | Up to 30 listings per search; used when the market is India and `ADZUNA_APP_ID` and `ADZUNA_APP_KEY` are set on the server |
 
 One failing source becomes a warning and the others still answer; RoleRadar reports an error only when every source fails. Each listing shows which source it came from.
 

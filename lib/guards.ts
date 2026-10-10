@@ -1,8 +1,8 @@
 export const MAX_FILE_BYTES = 8 * 1024 * 1024;
 export const MAX_LINK_BYTES = 2_000_000;
-export const MAX_QUERY_CHARS = 100;
-export const MIN_RESUME_CHARS = 40;
-export const MIN_RESUME_WORDS = 8;
+const MAX_QUERY_CHARS = 100;
+const MIN_RESUME_CHARS = 40;
+const MIN_RESUME_WORDS = 8;
 
 const TEXT_SUFFIXES = [".txt", ".md", ".markdown", ".text"];
 const LINK_TYPES = new Set(["text/plain", "text/markdown", "text/x-markdown", "application/markdown"]);
@@ -45,7 +45,7 @@ export function hasPdfMagic(bytes: Uint8Array): boolean {
   return head.includes("%PDF-");
 }
 
-export function toRawGithubUrl(url: URL): URL {
+function toRawGithubUrl(url: URL): URL {
   const match = url.hostname === "github.com" ? url.pathname.match(/^\/([^/]+)\/([^/]+)\/blob\/(.+)$/) : null;
   return match ? new URL(`https://raw.githubusercontent.com/${match[1]}/${match[2]}/${match[3]}`) : url;
 }
@@ -104,9 +104,8 @@ export async function readCapped(response: Response, maxBytes: number): Promise<
   return { ok: true, value: merged };
 }
 
-export function cleanQuery(value: string | null, fallback = ""): string {
-  const cleaned = (value ?? "").split(/\s+/).filter(Boolean).join(" ").slice(0, MAX_QUERY_CHARS);
-  return cleaned || fallback;
+export function cleanQuery(value: string | null): string {
+  return (value ?? "").split(/\s+/).filter(Boolean).join(" ").slice(0, MAX_QUERY_CHARS);
 }
 
 export function mapLevel(value: string | null): string | null {
